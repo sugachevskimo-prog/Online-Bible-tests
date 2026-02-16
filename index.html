@@ -781,7 +781,78 @@ function applyLectureOverrides(){
 }
 
 function getLectureTests(L){
-  return (L && Array.isArray(L.__overrideTests) && L.__overrideTests.length) ? L.__overrideTests : (L.tests||[]);
+  // base list (from JSON or override)
+  const base = (L && Array.isArray(L.__overrideTests) && L.__overrideTests.length)
+    ? L.__overrideTests.slice()
+    : ((L && Array.isArray(L.tests)) ? L.tests.slice() : []);
+
+  const lectureId = (L && L.id) ? L.id : null;
+
+  // Settings
+  let s = null;
+  try{ s = loadSettings(); }catch(e){ s = null; }
+  const shuffleOn = !!(s && s.shuffleTestsInLecture);
+
+  // Extract chapter number from title like "Глава 12 — ..."
+  const chapterNum = (t)=>{
+    const name = String((t && (t.title || t.name || t.caption || '')) || '');
+    const m = name.match(/Глава\s*(\d+)/i) || name.match(/Chapter\s*(\d+)/i);
+    return m ? parseInt(m[1],10) : Number.POSITIVE_INFINITY;
+  };
+
+  // Default: always ordered by chapter number
+  if(!shuffleOn || !lectureId){
+    const withNum = base.map((t, idx)=>({t, idx, n: chapterNum(t)}));
+    withNum.sort((a,b)=>{
+      if(a.n !== b.n) return a.n - b.n;
+      return a.idx - b.idx;
+    });
+    return withNum.map(x=>x.t);
+  }
+
+  // Shuffle enabled: stable per lecture (cached in localStorage)
+  const key = 'lectureOrder:' + lectureId;
+  let order = null;
+  try{ order = JSON.parse(localStorage.getItem(key) || 'null'); }catch(e){ order = null; }
+
+  const ids = base.map(t=>t && t.id).filter(Boolean);
+
+  const rebuild = ()=>{
+    const arr = ids.slice();
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    try{ localStorage.setItem(key, JSON.stringify(arr)); }catch(e){}
+    return arr;
+  };
+
+  if(!Array.isArray(order) || order.length !== ids.length || order.some(x=>!ids.includes(x))){
+    order = rebuild();
+  }
+
+  const byId = new Map(base.map(t=>[t.id, t]));
+  const ordered = order.map(id=>byId.get(id)).filter(Boolean);
+
+  // Append any remaining deterministically
+  if(ordered.length < base.length){
+    const used = new Set(ordered.map(t=>t.id));
+    const rest = base.filter(t=>t && t.id && !used.has(t.id));
+    rest.sort((a,b)=>chapterNum(a)-chapterNum(b));
+    ordered.push(...rest);
+  }
+
+  return ordered;
+}
+
+function getLectureIdForTest(testId){
+  try{
+    for(const L of (LECTURES||[])){
+      const tests = getLectureTests(L) || [];
+      if(tests.some(t=>t && t.id===testId)) return L.id;
+    }
+  }catch(e){}
+  return null;
 }
 
 function getAllTests(){
@@ -980,7 +1051,16 @@ function cleanQuestionText(txt){
 
 function hashStr(str){let h=2166136261>>>0; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i); h=Math.imul(h,16777619)>>>0;} return h>>>0;}
 function makeRng(seed){let x=seed>>>0; return ()=>{x^=x<<13; x>>>=0; x^=x>>>17; x>>>=0; x^=x<<5; x>>>=0; return (x>>>0)/4294967296;};}
-function shuffledIndices(n,rng){const a=[...Array(n).keys()]; for(let i=n-1;i>0;i--){const j=Math.floor(rng()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a;}
+function shuffledIndices(n,rng){const a=[...Array(n).keys()]; for(let i=n-1;i>0;i--){const j=Math.floor(rng()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
+
+function extractChapterNum(title){
+  const t = String(title||'');
+  let m = t.match(/\b(?:Глава|Гл\.)\s*(\d+)/i);
+  if(m) return parseInt(m[1],10);
+  m = t.match(/\b(?:Chapter|Test)\s*(\d+)/i);
+  if(m) return parseInt(m[1],10);
+  return 9999;
+}
 
 // ---- TTS (better voice + chunking) ----
 function getRuVoices(){
@@ -1005,6 +1085,30 @@ function clearTestResult(testId){
   const all = loadResults();
   delete all[testId];
   saveResults(all);
+
+function resetTestAllData(testId){
+  const tid = String(testId||'');
+  if(!tid) return;
+  // remove last result
+  clearTestResult(tid);
+  // remove attempt resume
+  clearAttempt(tid);
+  // remove per-question stats
+  try{
+    const qs = loadQStats();
+    if(qs && qs[tid]){ delete qs[tid]; saveQStats(qs); }
+  }catch(e){}
+  // remove review items
+  try{
+    const list = loadReviewSchedule();
+    saveReviewSchedule(list.filter(x=>x && String(x.testId)!==tid));
+  }catch(e){}
+  // remove history entries for this test
+  try{
+    const h = loadHistory();
+    saveHistory(h.filter(x=>x && String(x.testId)!==tid));
+  }catch(e){}
+}
 }
 
 // ---- Global history (who passed & best score) ----
@@ -1353,12 +1457,116 @@ function wireSettingsUI(){
 // ---- Renderers ----
 // ---- UX helpers (vPro) ----
 function norm(s){return (s||'').toString().toLowerCase().trim();}
-function lectureStats(lectureId){
-  const hist = loadHistory().filter(x=>x.lectureId===lectureId);
-  const best = hist.reduce((a,b)=>(!a|| (b.percent||0)>(a.percent||0))?b:a, null);
-  const last = hist[0] || null;
-  return {count: hist.length, best: best?best.percent||0:0, last: last?last.percent||0:0, lastDate: last?last.date||'':''};
+function buildTestLectureMap(){
+  const map = {};
+  (LECTURES||[]).forEach(L=>{
+    const tests = getLectureTests(L)||[];
+    tests.forEach((t,idx)=>{
+      if(t && t.id!=null) map[String(t.id)] = {lectureId:L.id, lectureTitle:L.title||'', testIndex:idx};
+    });
+  });
+  return map;
 }
+
+function normalizeHistory(list){
+  const map = buildTestLectureMap();
+  return (Array.isArray(list)?list:[]).map(x=>{
+    if(!x) return x;
+    if(!x.lectureId && x.testId!=null){
+      const m = map[String(x.testId)];
+      if(m){ x.lectureId = m.lectureId; x.lectureTitle = x.lectureTitle || m.lectureTitle; }
+    }
+    return x;
+  });
+}
+
+function getTestStatsById(testId){
+  const hist = normalizeHistory(loadHistory()).filter(x=>String(x.testId)===String(testId));
+  if(!hist.length) return {attempts:0, passed:0, avg:0, best:0, last:0, lastDate:''};
+  let sum=0, best=0, passed=0;
+  hist.forEach(h=>{
+    const p=Number(h.percent||0)||0;
+    sum += p;
+    if(p>best) best=p;
+    if(h.passed) passed++;
+  });
+  const last = hist[0];
+  return {
+    attempts: hist.length,
+    passed,
+    avg: Math.round((sum/hist.length)*10)/10,
+    best: Math.round(best*10)/10,
+    last: Math.round((Number(last.percent||0)||0)*10)/10,
+    lastDate: last.date||''
+  };
+}
+
+function lectureStats(lectureId){
+  const hist = normalizeHistory(loadHistory()).filter(x=>x.lectureId===lectureId);
+  const L = (LECTURES||[]).find(x=>x.id===lectureId);
+  const tests = L ? (getLectureTests(L)||[]) : [];
+  const uniqueTests = new Set(hist.map(h=>String(h.testId)));
+  const attempts = hist.length;
+
+  let sum=0, best=0, passedAttempts=0;
+  hist.forEach(h=>{
+    const p=Number(h.percent||0)||0;
+    sum += p;
+    if(p>best) best=p;
+    if(h.passed) passedAttempts++;
+  });
+
+  const avg = attempts ? Math.round((sum/attempts)*10)/10 : 0;
+  const last = hist[0] || null;
+
+  return {
+    testsTotal: tests.length,
+    testsDone: uniqueTests.size,
+    attempts,
+    passedAttempts,
+    avg,
+    best: Math.round(best*10)/10,
+    last: last?Math.round((Number(last.percent||0)||0)*10)/10:0,
+    lastDate: last?last.date||'':''
+  };
+}
+
+function lectureAnswerStats(lectureId){
+  const L = (LECTURES||[]).find(x=>x.id===lectureId);
+  const tests = L ? (getLectureTests(L)||[]) : [];
+  const results = loadResults();
+  let correct=0, wrong=0, unanswered=0, total=0, answered=0;
+  tests.forEach(t=>{
+    const qTotal = (t.questions||[]).length || 0;
+    const r = results[t.id];
+    if(r && typeof r==='object'){
+      const c = Number(r.correctN||0)||0;
+      const w = Number(r.wrongN||0)||0;
+      const s = Number(r.skippedN||0)||0;
+      const tot = Number(r.total||qTotal)||qTotal;
+      correct += c; wrong += w; unanswered += s;
+      total += tot;
+      answered += Math.max(0, tot - s);
+    }else{
+      // Test never taken: all questions considered unanswered
+      correct += 0; wrong += 0;
+      unanswered += qTotal;
+      total += qTotal;
+    }
+  });
+  // Safety: clamp
+  if(total<0) total=0;
+  if(correct<0) correct=0;
+  if(wrong<0) wrong=0;
+  if(unanswered<0) unanswered=0;
+  const sum = correct+wrong+unanswered;
+  if(sum!==total){
+    // adjust unanswered to fit total if needed
+    unanswered = Math.max(0, total - correct - wrong);
+  }
+  return {total, correct, wrong, unanswered};
+}
+
 function lectureTestCount(lectureId){
   const L=LECTURES.find(x=>x.id===lectureId);
   if(!L) return 0;
@@ -1404,7 +1612,7 @@ function renderHome(){
     const st = lectureStats(L.id);
     const due = dueByLecture[L.id]||0;
 
-    const badge = st.count ? `<span class="pill">🏁 Лучший: <b>${st.best}%</b></span>` : `<span class="pill">🧪 Ещё не проходили</span>`;
+    const badge = st.attempts ? `<span class="pill">✅ Пройдено: <b>${st.testsDone}/${st.testsTotal}</b></span><span class="pill">📊 Средний: <b>${st.avg}%</b></span><span class="pill">🏁 Лучший: <b>${st.best}%</b></span>` : `<span class="pill">🧪 Ещё не проходили</span>`;
     const dueBadge = due ? `<span class="pill" style="border-color:rgba(96,240,208,.35)">🧠 Повторить: <b>${due}</b></span>` : ``;
 
     const btns = count
@@ -1509,6 +1717,11 @@ function renderLecture(lectureId){
   state.view='lecture';
   const tests = getLectureTests(L);
 
+
+  let testsView = tests.slice();
+  // Keep chapters/tests in natural order (Глава 1, 2, 3 ...)
+  try{ testsView.sort((a,b)=>extractChapterNum(a.title)-extractChapterNum(b.title)); }catch(e){}
+
   const bc = `<div class="breadcrumb"><a href="#" id="homeLink">Главная</a> / ${esc(L.title)}</div>`;
 
   // Auto-load questions from deployed JSON (if present) when this lecture has no tests yet.
@@ -1562,11 +1775,12 @@ function renderLecture(lectureId){
     return;
   }
 
-  const cards = tests.map((t,idx)=>{
+  const cards = testsView.map((t,idx)=>{
     const img = (idx%2===0 ? IMAGES.thumb1 : IMAGES.thumb2) || IMAGES.hero;
     const last = loadResults()[t.id];
     const best = getBestForTest(t.id);
-    const statLine = (last||best) ? `<div class="small" style="margin-top:6px">${last?`Последний: <b>${last.percent}%</b>`:'Последний: —'}${best?` • Лучший: <b>${best.percent||0}%</b> (${esc(best.name||'—')})`:''}</div>` : '';
+    const ts = getTestStatsById(t.id);
+    const statLine = ts.attempts ? `<div class="small" style="margin-top:6px">Попыток: <b>${ts.attempts}</b> • Средний: <b>${ts.avg}%</b> • Лучший: <b>${ts.best}%</b>${last?` • Последний: <b>${last.percent}%</b>`:''}</div>` : ((last||best) ? `<div class="small" style="margin-top:6px">${last?`Последний: <b>${last.percent}%</b>`:'Последний: —'}${best?` • Лучший: <b>${best.percent||0}%</b> (${esc(best.name||'—')})`:''}</div>` : '');
     return `<div class="card">
       <div class="thumb" style="background-image:${img?`url(${img})`:'none'}"></div>
       <h3>${esc(t.title||('Тест '+(idx+1)))}</h3>
@@ -1574,6 +1788,7 @@ function renderLecture(lectureId){
       ${statLine}
       <div class="toolbar" style="margin-top:12px">
         <button class="btn primary" data-open-test="${t.id}">Начать</button>
+        ${(ts.attempts || last)?`<button class="btn" data-reset-test="${t.id}" title="Сбросить результаты этой главы">Сбросить</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1590,12 +1805,17 @@ function renderLecture(lectureId){
     </div>` : '';
 
   const lstats = lectureStats(L.id);
+  const astats = lectureAnswerStats(L.id);
   const head = `<div class="card" style="margin-bottom:12px">
       <h3 style="margin:0 0 6px 0">${esc(L.title)}</h3>
       <div class="qmeta">
-        <span class="pill">🧪 Тестов: ${tests.length}</span>
-        <span class="pill">🏁 Прохождений: ${lstats.count}</span>
-        <span class="pill">⭐ Лучший: <b>${lstats.best}%</b></span>
+        <span class="pill">🧪 Тестов: ${lstats.testsTotal}</span>
+        <span class="pill">✅ Пройдено: <b>${lstats.testsDone}/${lstats.testsTotal}</b></span>
+        <span class="pill">📊 Средний: <b>${lstats.avg}%</b></span>
+        <span class="pill">🏁 Лучший: <b>${lstats.best}%</b></span>
+        <span class="pill">✅ Правильно: <b>${astats.correct}</b></span>
+        <span class="pill">❌ Неверно: <b>${astats.wrong}</b></span>
+        <span class="pill">⏭ Не отвечено: <b>${astats.unanswered}</b> / ${astats.total}</span>
       </div>
       <div style="margin-top:10px">
         <input id="lectureSearch" class="input" placeholder="Поиск тестов в этой лекции…" />
@@ -1616,11 +1836,32 @@ function renderLecture(lectureId){
       card.style.display = (!q || title.includes(q)) ? '' : 'none';
     });
   });
-
     $$('[data-open-test]').forEach(b=>b.onclick=()=>{
     const testId=b.getAttribute('data-open-test');
     state.currentLecture=L.id;
     openStartModal(testId);
+  });
+
+
+  // reset per test (chapter)
+  $$('[data-reset-test]').forEach(b=>b.onclick=()=>{
+    const testId=b.getAttribute('data-reset-test');
+    if(!testId) return;
+    if(!confirm('Сбросить результаты этой главы на этом устройстве?')) return;
+    try{
+      clearTestResult(testId);
+      clearHistoryForTest(testId);
+      clearAttempt(testId);
+      // clear question stats
+      const qs = loadQStats(); if(qs && qs[testId]){ delete qs[testId]; saveQStats(qs); }
+      // clear review schedule items
+      const rv = loadReviewSchedule(); saveReviewSchedule((rv||[]).filter(x=>x && x.testId!==testId));
+      toast('Сброшено','info');
+      renderLecture(L.id);
+    }catch(e){
+      console.error(e);
+      alert('Не удалось сбросить: '+(e&&e.message?e.message:e));
+    }
   });
 
   // lecture JSON tools
@@ -1771,7 +2012,11 @@ function openStartModal(testId){
       <label>Порядок вопросов</label>
       <label class="opt" style="display:flex;gap:10px;align-items:center">
         <input id="shuffleQ" type="checkbox" checked>
-        <div class="label">Перемешивать вопросы (рекомендуется для запоминания)</div>
+        <div class="label">Перемешивать вопросы в этой главе (в выбранном тесте)</div>
+      </label>
+      <label class="opt" style="margin-top:10px">
+        <input id="shuffleLecture" type="checkbox">
+        <div class="label">Перемешивать порядок тестов в этой лекции</div>
       </label>
     `;
     const toolbar = document.querySelector('#startModal .toolbar');
@@ -1779,6 +2024,17 @@ function openStartModal(testId){
   }
   const shuffleBox = document.getElementById('shuffleQ');
   shuffleBox.checked = (s.shuffleQuestions !== false);
+
+  const shuffleLectureBox = document.getElementById('shuffleLecture');
+  if(shuffleLectureBox){
+    shuffleLectureBox.checked = !!s.shuffleTestsInLecture;
+    shuffleLectureBox.onchange = ()=>{
+      const cur = loadSettings();
+      cur.shuffleTestsInLecture = !!shuffleLectureBox.checked;
+      saveSettings(cur);
+      try{ if(state.lectureId){ localStorage.removeItem('lectureOrder:'+state.lectureId); } }catch(e){}
+    };
+  }
 
   // Resume banner
   let resumeBox = document.getElementById('resumeBox');
@@ -1828,6 +2084,7 @@ function openStartModal(testId){
     s.lastName=name; 
     s.lastMode=modeSel.value;
     s.shuffleQuestions = !!shuffleBox.checked;
+    if(shuffleLectureBox){ s.shuffleTestsInLecture = !!shuffleLectureBox.checked; }
     saveSettings(s);
     state.userName=name;
     state.mode = modeSel.value;
@@ -2253,10 +2510,13 @@ function renderResult(){
   // History
   addHistoryEntry({
     name: (s.lastName||'—'),
+    lectureId: state.lectureId,
+    lectureTitle: (LECTURES.find(x=>x.id===state.lectureId)||{}).title || '',
     testId: t.id,
     testTitle: t.title,
     percent,
     passed,
+    mode: state.mode,
     date: dateStr
   });
 
@@ -2351,6 +2611,12 @@ function renderResult(){
         <button class="btn" id="btnShowReviewList">Список ошибок</button>
         <button class="btn" id="btnRestartExam">Пройти ещё раз (экзамен)</button>
       </div>
+
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn primary" id="btnNextTest">Перейти к следующему тесту</button>
+        <button class="btn" id="btnBackToLecture">Перейти ко всем тестам</button>
+      </div>
+
       <div class="small" style="margin-top:10px">Чтобы лучше запомнить: повторите ошибки сегодня, затем ещё раз через 1–3–7 дней (появится на главной в «Повторение»).</div>
     </div>
     ${mistakesHtml}
@@ -2368,6 +2634,33 @@ function renderResult(){
     state.mode='exam';
     openStartModal(t.id);
   };
+
+  // Next test navigation (within same lecture)
+  const btnNext = document.getElementById('btnNextTest');
+  const btnBackLecture = document.getElementById('btnBackToLecture');
+  const lectureId = getLectureIdForTest(t.id) || state.lectureId || 'L1';
+  const L = (LECTURES||[]).find(x=>x.id===lectureId) || (LECTURES||[])[0];
+  const lectureTests = getLectureTests(L) || [];
+  const curIdx = lectureTests.findIndex(x=>x && x.id===t.id);
+  const nextTest = (curIdx>=0 && curIdx < lectureTests.length-1) ? lectureTests[curIdx+1] : null;
+
+  if(btnBackLecture){
+    btnBackLecture.onclick=()=>renderLecture(lectureId);
+  }
+  if(btnNext){
+    if(!nextTest){
+      btnNext.textContent = 'Следующего теста нет (это последний)';
+    }
+    btnNext.onclick=()=>{
+      if(nextTest){
+        state.lectureId = lectureId;
+        openStartModal(nextTest.id);
+      }else{
+        toast('Это последний тест в этой лекции.','info');
+        renderLecture(lectureId);
+      }
+    };
+  }
 
   $('#btnReviewMistakes').onclick=()=>{
     const wrong = (state.lastFullRows||[]).filter(r=>r && !r.ok && r.qIndex!==undefined);

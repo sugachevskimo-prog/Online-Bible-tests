@@ -652,6 +652,59 @@ let LECTURES = Array.from({length:10},(_,i)=>({id:`L${i+1}`, title:LECTURE_TITLE
 LECTURES[0].tests = TESTS;
 
 // --- Dynamic JSON questions loader (per-lecture) ---
+// Auto-load questions JSON from the published site if a file exists (no manual upload needed).
+// Place your files in the repo so they are deployed alongside index.html, e.g.:
+//   /data/L2.json  or  /data/lecture2.json  or  /data/lektion2.json  (also supports spaces like 'lektion 2.json')
+const __AUTO_FETCH_TRIED__ = new Set();
+
+function lectureJsonCandidates(lectureId){
+  const n = String(lectureId||'').replace(/^L/i,'');
+  // Try several common naming conventions (with and without folder)
+  return [
+    `data/${lectureId}.json`,
+    `data/lecture${n}.json`,
+    `data/lecture_${n}.json`,
+    `data/lektion${n}.json`,
+    `data/lektion_${n}.json`,
+    `data/lektion ${n}.json`,
+    `${lectureId}.json`,
+    `lecture${n}.json`,
+    `lektion${n}.json`,
+    `lektion ${n}.json`,
+  ];
+}
+
+async function autoFetchLectureJson(lectureId){
+  const urls = lectureJsonCandidates(lectureId);
+  for(const url of urls){
+    try{
+      const res = await fetch(url, { cache: 'no-store' });
+      if(!res || !res.ok) continue;
+      const obj = await res.json();
+      const tests = parseTestsFromAnyJson(obj);
+      if(!Array.isArray(tests) || !tests.length) continue;
+      saveSavedQuestionsJson(lectureId, obj);
+      return true;
+    }catch(e){
+      // try next url
+    }
+  }
+  return false;
+}
+
+function autoFetchLectureJsonOnce(lectureId){
+  if(__AUTO_FETCH_TRIED__.has(lectureId)) return false;
+  __AUTO_FETCH_TRIED__.add(lectureId);
+  autoFetchLectureJson(lectureId).then(ok=>{
+    if(ok){
+      toast('Вопросы загружены');
+    }
+    // Re-render in both cases: either we loaded questions or we show upload UI.
+    renderLecture(lectureId);
+  });
+  return true;
+}
+
 let __PENDING_LECTURE_IMPORT__ = null;
 
 function qKey(lectureId){ return `zbg_questions_json_${lectureId}_v1`; }
@@ -1457,6 +1510,20 @@ function renderLecture(lectureId){
   const tests = getLectureTests(L);
 
   const bc = `<div class="breadcrumb"><a href="#" id="homeLink">Главная</a> / ${esc(L.title)}</div>`;
+
+  // Auto-load questions from deployed JSON (if present) when this lecture has no tests yet.
+  if(!tests.length && L.id!=='L1'){
+    const saved = loadSavedQuestionsJson(L.id);
+    if(!saved){
+      const started = autoFetchLectureJsonOnce(L.id);
+      if(started){
+        $('#content').innerHTML = bc + `<div class="card"><h3>${esc(L.title)}</h3><p>Загружаю вопросы для этой лекции…</p><div class="toolbar" style="margin-top:10px"><button class="btn" id="backHome">Назад</button></div></div>`;
+        $('#homeLink').onclick=(e)=>{e.preventDefault(); renderHome();};
+        $('#backHome').onclick=()=>renderHome();
+        return;
+      }
+    }
+  }
 
   // Empty lecture: offer JSON upload (for L2..L10)
   if(!tests.length){

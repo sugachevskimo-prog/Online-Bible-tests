@@ -722,10 +722,20 @@ function applyLectureOverrides(){
       L.__overrideTests = null;
     }
   });
+
+  // обновляем общий список тестов (нужен для старта/статистики)
+  TESTS = getAllTests();
 }
 
 function getLectureTests(L){
   return (L && Array.isArray(L.__overrideTests) && L.__overrideTests.length) ? L.__overrideTests : (L.tests||[]);
+}
+
+function getAllTests(){
+  return (LECTURES||[]).flatMap(L => getLectureTests(L) || []);
+}
+function findTestById(id){
+  return getAllTests().find(t => t && t.id === id);
 }
 
 function __normCorrectIndex(opts, c){
@@ -882,7 +892,7 @@ function updateProgressUI(){
   const bar=document.getElementById('progressBar');
   const pill=document.getElementById('progressPill');
   const okPill=document.getElementById('correctPill');
-  const t=TESTS.find(x=>x.id===state.testId);
+  const t=findTestById(state.testId);
   if(!t) return;
   const total=(t.questions||[]).length||0;
   const answered=(state.rows||[]).length||0;
@@ -1070,7 +1080,7 @@ function startDueReview(lectureId){
   const counts = {};
   due.forEach(x=>{ counts[x.testId]=(counts[x.testId]||0)+1; });
   const testId = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
-  const t = TESTS.find(x=>x.id===testId);
+  const t = findTestById(testId);
   if(!t){ toast('Тест не найден.','info'); return; }
   const qIndexList = [...new Set(due.filter(x=>x.testId===testId && x.qIndex!==undefined).map(x=>x.qIndex))];
   if(!qIndexList.length){ toast('Нет вопросов для повторения.','info'); return; }
@@ -1567,7 +1577,7 @@ function renderLecture(lectureId){
 
 
 function showReviewModal(testId, r){
-  const t = TESTS.find(x=>x.id===testId);
+  const t = findTestById(testId);
   if(!t) return;
   const rows = r.rows || [];
   let wrongHtml = '';
@@ -1594,7 +1604,7 @@ function showReviewModal(testId, r){
 
 // ---- «Работа над ошибками» — пройти только неверные/пропущенные вопросы, пока не станет 100% ----
 function startMistakesChase(testId){
-  const t = TESTS.find(x=>x.id===testId);
+  const t = findTestById(testId);
   if(!t) return;
 
   const full = Array.isArray(state.lastFullRows) ? state.lastFullRows : [];
@@ -1635,7 +1645,7 @@ function startMistakesChase(testId){
 
 function finishMistakesChase(){
   // Simple “100% fixed” screen
-  const t=TESTS.find(x=>x.id===state.testId);
+  const t=findTestById(state.testId);
   const fixed = (state.mistakeMeta && state.mistakeMeta.initial) ? state.mistakeMeta.initial : 0;
   $('#content').innerHTML = `
     <div class="card" style="padding:16px">
@@ -1655,7 +1665,7 @@ function finishMistakesChase(){
 }
 function openStartModal(testId){
   state.testId=testId;
-  const t=TESTS.find(x=>x.id===testId);
+  const t=findTestById(testId);
   $('#startTitle').textContent = t? t.title : 'Начать тест';
 
   // Resume info (if exists)
@@ -1808,7 +1818,8 @@ function openStartModal(testId){
 
 
 function startTest(testId){
-  const t=TESTS.find(x=>x.id===testId);
+  const t=findTestById(testId);
+  if(!t){ toast("Не удалось найти тест. Проверь загрузку JSON.", true); return; }
   state.view='quiz';
   state.testId=testId;
 
@@ -1853,7 +1864,8 @@ function startTest(testId){
 
 
 function renderQuestion(){
-  const t=TESTS.find(x=>x.id===state.testId);
+  const t=findTestById(state.testId);
+  if(!t){ toast("Не удалось найти текущий тест. Перезагрузи страницу и загрузь JSON заново.", true); return; }
   // Support subset sessions (e.g., «работа над ошибками»): if state.qOrder is non-empty, we use it as the session order.
   const qOrder = (Array.isArray(state.qOrder) && state.qOrder.length>0)
     ? state.qOrder
@@ -2118,7 +2130,7 @@ function renderQuestion(){
 
 function renderResult(){
   stopTimer();
-  const t=TESTS.find(x=>x.id===state.testId);
+  const t=findTestById(state.testId);
   const qOrder = (Array.isArray(state.qOrder) && state.qOrder.length>0)
     ? state.qOrder
     : t.questions.map((_,i)=>i);

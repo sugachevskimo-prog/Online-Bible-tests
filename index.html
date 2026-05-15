@@ -2125,7 +2125,7 @@ function openStartModal(test){
     }
     clearAttempt(testId);
     $('#startModal').style.display='none';
-startTest(test)
+startTest(test.id)
   };
 
   // Resume wiring
@@ -2167,20 +2167,17 @@ startTest(test)
 
 
 
-function startTest(test){
+function startTest(testId){
 
-  const t = test;
+  const t = findTestById(testId);
 
   if(!t){
-    toast('Не удалось найти тест. Проверь загрузку JSON.', true);
+    toast('Не удалось найти тест', true);
     return;
   }
 
   state.view='quiz';
   state.testId=t.id;
-  if(!t){ toast("Не удалось найти тест. Проверь загрузку JSON.", true); return; }
-  state.view='quiz';
-  state.testId=testId;
 
   // Init attempt
   state.qi=0; 

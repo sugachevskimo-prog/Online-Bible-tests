@@ -2099,7 +2099,7 @@ function openStartModal(testId){
     }
     clearAttempt(testId);
     $('#startModal').style.display='none';
-    startTest(testId);
+    startTest(t.id);
   };
 
   // Resume wiring
@@ -2145,7 +2145,7 @@ function startTest(testId){
   const t=findTestById(testId);
   if(!t){ toast("Не удалось найти тест. Проверь загрузку JSON.", true); return; }
   state.view='quiz';
-  state.testId=testId;
+  state.testId=t.id;
 
   // Init attempt
   state.qi=0; 

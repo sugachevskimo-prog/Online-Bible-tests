@@ -745,20 +745,35 @@ function importQuestionsJsonFileForLecture(lectureId, file){
 
 
 function parseTestsFromAnyJson(obj){
-  // Reuse existing buildFromQuestionsJson safely by snapshotting globals.
-  const snapL = LECTURES;
-  const snapT = TESTS;
-  try{
-    buildFromQuestionsJson(obj);
-    // clone to detach from temp mutations
-    const out = JSON.parse(JSON.stringify(Array.isArray(TESTS)?TESTS:[]));
-    return out;
-  }catch(e){
-    throw e;
-  }finally{
-    LECTURES = snapL;
-    TESTS = snapT;
+
+  // FORMAT 1:
+  // {
+  //   lectures:[{tests:[...]}]
+  // }
+
+  if(obj && Array.isArray(obj.lectures)){
+    return obj.lectures.flatMap(l => l.tests || []);
   }
+
+  // FORMAT 2:
+  // {
+  //   Vorlesungen:[{Tests:[...]}]
+  // }
+
+  if(obj && Array.isArray(obj.Vorlesungen)){
+    return obj.Vorlesungen.flatMap(v => v.Tests || []);
+  }
+
+  // FORMAT 3:
+  // {
+  //   Tests:[...]
+  // }
+
+  if(obj && Array.isArray(obj.Tests)){
+    return obj.Tests;
+  }
+
+  return [];
 }
 
 function applyLectureOverrides(){

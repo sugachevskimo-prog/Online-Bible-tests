@@ -1996,10 +1996,9 @@ function finishMistakesChase(){
   $('#btnReviewAgain').onclick=()=>{ state.mistakeChase=false; openStartModal(state.testId); };
 }
 function openStartModal(test){
-
-  state.testId = test.id;
-
-  const t = test;
+state.testId=test.id;
+const t=test;
+  
   $('#startTitle').textContent = t? t.title : 'Начать тест';
 
   // Resume info (if exists)
@@ -2125,7 +2124,7 @@ function openStartModal(test){
     }
     clearAttempt(testId);
     $('#startModal').style.display='none';
-startTest(testId)
+startTest(state.testId)
   };
 
   // Resume wiring

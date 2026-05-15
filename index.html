@@ -931,11 +931,14 @@ function buildFromQuestionsJson(obj){
      const tests = (l.tests||l.quizzes||[]).map((t, ti)=>
   __buildTest(
     t,
-    `L${i+1}_T${ti+1}`,
+    `L${li+1}_T${ti+1}`,
     `Тест ${ti+1}`
   )
 );
-      return { id: String(L.id ?? `L${li+1}`), title: String(L.title ?? `Лекция ${li+1}`), tests };
+       return {
+         id: String(l.id ?? `L${li+1}`),
+         title: String(l.title ?? `Лекция ${li+1}`),
+         tests };
     });
     LECTURES = lectures.length ? lectures : LECTURES;
     // flatten for convenience

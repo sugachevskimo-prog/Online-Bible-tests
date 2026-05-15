@@ -899,11 +899,14 @@ function __buildTest(testObj, idFallback, titleFallback){
   const title = testObj.title ?? testObj.name ?? titleFallback ?? 'Тест';
   const rawQs = testObj.questions || testObj.items || [];
   const qs = rawQs.map((q,i)=>__normalizeQuestion(q, i+1));
-  return {
+return {
   id: String(
     testObj.id ??
-    (titleFallback + '_' + idFallback), title: String(title), questions: qs };
-}
+    (titleFallback + '_' + idFallback)
+  ),
+  title: String(title),
+  questions: qs
+};
 
 function buildFromQuestionsJson(obj){
   // supported formats:

@@ -661,12 +661,12 @@ function lectureJsonCandidates(lectureId){
   const n = String(lectureId||'').replace(/^L/i,'');
   // Try several common naming conventions (with and without folder)
   return [
-    `Daten/${lectureId}.json`,
-    `Daten/lecture${n}.json`,
-    `Daten/lecture_${n}.json`,
-    `Daten/lektion${n}.json`,
-    `Daten/lektion_${n}.json`,
-    `Daten/lektion ${n}.json`,
+    `data/${lectureId}.json`,
+    `data/lecture${n}.json`,
+    `data/lecture_${n}.json`,
+    `data/lektion${n}.json`,
+    `data/lektion_${n}.json`,
+    `data/lektion ${n}.json`,
     `${lectureId}.json`,
     `lecture${n}.json`,
     `lektion${n}.json`,

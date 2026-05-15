@@ -745,35 +745,20 @@ function importQuestionsJsonFileForLecture(lectureId, file){
 
 
 function parseTestsFromAnyJson(obj){
-
-   // FORMAT 1:
-  // {
-  //   lectures:[{tests:[...]}]
-  // }
-
-  if(obj && Array.isArray(obj.lectures)){
-    return obj.lectures.flatMap(l => l.tests || []);
+  // Reuse existing buildFromQuestionsJson safely by snapshotting globals.
+  const snapL = LECTURES;
+  const snapT = TESTS;
+  try{
+    buildFromQuestionsJson(obj);
+    // clone to detach from temp mutations
+    const out = JSON.parse(JSON.stringify(Array.isArray(TESTS)?TESTS:[]));
+    return out;
+  }catch(e){
+    throw e;
+  }finally{
+    LECTURES = snapL;
+    TESTS = snapT;
   }
-
-  // FORMAT 2:
-  // {
-  //   Vorlesungen:[{Tests:[...]}]
-  // }
-
-  if(obj && Array.isArray(obj.Vorlesungen)){
-    return obj.Vorlesungen.flatMap(v => v.Tests || []);
-  }
-
-  // FORMAT 3:
-  // {
-  //   Tests:[...]
-  // }
-
-  if(obj && Array.isArray(obj.Tests)){
-    return obj.Tests;
-  }
-
-  return [];
 }
 
 function applyLectureOverrides(){
@@ -1802,7 +1787,7 @@ function renderLecture(lectureId){
       <p class="small">Вопросов: ${(t.questions||[]).length}</p>
       ${statLine}
       <div class="toolbar" style="margin-top:12px">
-        <button class="btn primary" data-open-test="${L.id}___${idx}">Начать</button>
+        <button class="btn primary" data-open-test="${t.id}">Начать</button>
         ${(ts.attempts || last)?`<button class="btn" data-reset-test="${t.id}" title="Сбросить результаты этой главы">Сбросить</button>`:''}
       </div>
     </div>`;
@@ -1851,21 +1836,12 @@ function renderLecture(lectureId){
       card.style.display = (!q || title.includes(q)) ? '' : 'none';
     });
   });
-  $$('[data-open-test]').forEach(b=>b.onclick=()=>{
+    $$('[data-open-test]').forEach(b=>b.onclick=()=>{
+    const testId=b.getAttribute('data-open-test');
+    state.currentLecture=L.id;
+    openStartModal(testId);
+  });
 
-  const testId = b.getAttribute('data-open-test');
-
-  state.currentLecture = L.id;
-
-  const lecture =
-    LECTURES.find(x => x.id === L.id);
-
-  const test =
-    lecture.tests.find(x => x.id === testId);
-
-  openStartModal(test);
-
-});
 
   // reset per test (chapter)
   $$('[data-reset-test]').forEach(b=>b.onclick=()=>{
@@ -1995,75 +1971,181 @@ function finishMistakesChase(){
   $('#btnBackHome').onclick=()=>renderHome();
   $('#btnReviewAgain').onclick=()=>{ state.mistakeChase=false; openStartModal(state.testId); };
 }
-function openStartModal(test){
+function openStartModal(testId){
+  state.testId=testId;
+  const t=findTestById(testId);
+  $('#startTitle').textContent = t? t.title : 'Начать тест';
 
-  if(!test){
-    toast('Тест не найден', true);
-    return;
-  }
-
-  state.testId = test.id;
-
-  const t = test;
-
-  $('#startTitle').textContent =
-    t ? t.title : 'Начать тест';
-
-  // Resume info
-  const saved = loadAttempt(t.id);
+  // Resume info (if exists)
+  const saved = loadAttempt(testId);
 
   // Fill defaults
-  const s = loadSettings();
+  const s=loadSettings();
+  $('#nameInput').value = s.lastName||'';
+  if($('#timeSelect')) $('#timeSelect').value = String(s.timeMin || 10);
 
-  $('#nameInput').value =
-    s.lastName || '';
-
-  if($('#timeSelect')){
-    $('#timeSelect').value =
-      String(s.timeMin || 10);
+  // Mode selector (insert once)
+  if(!document.getElementById('modeSelect')){
+    const field = document.createElement('div');
+    field.className='field';
+    field.innerHTML = `
+      <label>Режим</label>
+      <select id="modeSelect" class="input">
+        <option value="practice">Практика (учусь)</option>
+        <option value="exam" selected>Экзамен (оценка)</option>
+      </select>
+      <div class="small" style="margin-top:6px">Практика — без стресса: можно пропускать, цель — закрепить ответы. Экзамен — результат, таймер и статистика.</div>
+    `;
+    // Insert before timer field
+    const timerField = document.querySelector('#startModal .field:nth-of-type(2)');
+    timerField?.parentNode?.insertBefore(field, timerField);
   }
+
+  const modeSel = document.getElementById('modeSelect');
+  modeSel.value = s.lastMode || 'exam';
+
+  // Shuffle questions toggle (insert once)
+  if(!document.getElementById('shuffleQ')){
+    const wrap = document.createElement('div');
+    wrap.className='field';
+    wrap.innerHTML = `
+      <label>Порядок вопросов</label>
+      <label class="opt" style="display:flex;gap:10px;align-items:center">
+        <input id="shuffleQ" type="checkbox" checked>
+        <div class="label">Перемешивать вопросы в этой главе (в выбранном тесте)</div>
+      </label>
+      <label class="opt" style="margin-top:10px">
+        <input id="shuffleLecture" type="checkbox">
+        <div class="label">Перемешивать порядок тестов в этой лекции</div>
+      </label>
+    `;
+    const toolbar = document.querySelector('#startModal .toolbar');
+    toolbar?.parentNode?.insertBefore(wrap, toolbar);
+  }
+  const shuffleBox = document.getElementById('shuffleQ');
+  shuffleBox.checked = (s.shuffleQuestions !== false);
+
+  const shuffleLectureBox = document.getElementById('shuffleLecture');
+  if(shuffleLectureBox){
+    shuffleLectureBox.checked = !!s.shuffleTestsInLecture;
+    shuffleLectureBox.onchange = ()=>{
+      const cur = loadSettings();
+      cur.shuffleTestsInLecture = !!shuffleLectureBox.checked;
+      saveSettings(cur);
+      try{ if(state.lectureId){ localStorage.removeItem('lectureOrder:'+state.lectureId); } }catch(e){}
+    };
+  }
+
+  // Resume banner
+  let resumeBox = document.getElementById('resumeBox');
+  if(!resumeBox){
+    resumeBox = document.createElement('div');
+    resumeBox.id='resumeBox';
+    resumeBox.className='notice';
+    resumeBox.style.display='none';
+    resumeBox.style.marginTop='10px';
+    resumeBox.style.borderColor='rgba(255,255,255,.14)';
+    document.querySelector('#startModal .box')?.insertBefore(resumeBox, document.querySelector('#startModal .toolbar'));
+  }
+  if(saved && typeof saved.qi==='number' && saved.qi>0 && Array.isArray(saved.rows)){
+    const answered = saved.rows.filter(r=>r && (r.selectedIdx||[]).length>0).length;
+    resumeBox.style.display='block';
+    resumeBox.innerHTML = `
+      <div><b>Найдена незавершённая попытка</b></div>
+      <div class="small">Прогресс: ${answered} / ${(t && t.questions && t.questions.length) || '—'} вопросов • Режим: ${saved.mode==='practice'?'Практика':'Экзамен'}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="btnResume">Продолжить</button>
+        <button class="btn" id="btnStartNew">Начать заново</button>
+      </div>
+    `;
+  }else{
+    resumeBox.style.display='none';
+    resumeBox.innerHTML='';
+  }
+
+  // Enable/disable timer UI depending on mode
+  const syncModeUI=()=>{
+    const isExam = (modeSel.value==='exam');
+    const timerField = document.querySelector('#startModal .field:nth-of-type(3)'); // name, mode, timer
+    if(timerField) timerField.style.display = isExam ? '' : 'none';
+  };
+  modeSel.onchange=syncModeUI; syncModeUI();
 
   $('#startModal').style.display='flex';
 
-  const confirmBtn=()=>{
-    $('#btnStart').disabled =
-      $('#nameInput').value.trim().length===0;
-  };
+  const confirmBtn=()=>{ $('#btnStart').disabled = $('#nameInput').value.trim().length===0; };
+  $('#nameInput').oninput=confirmBtn; confirmBtn();
 
-  $('#nameInput').oninput=confirmBtn;
-  confirmBtn();
+  $('#btnCancel').onclick=()=>$('#startModal').style.display='none';
 
-  $('#btnCancel').onclick=()=>{
-    $('#startModal').style.display='none';
-  };
-
-  $('#btnStart').onclick=()=>{
-
-    const name =
-      $('#nameInput').value.trim();
-
+  const startFresh=()=>{
+    const name=$('#nameInput').value.trim();
     if(!name) return;
-
-    state.userName = name;
-
+    s.lastName=name; 
+    s.lastMode=modeSel.value;
+    s.shuffleQuestions = !!shuffleBox.checked;
+    if(shuffleLectureBox){ s.shuffleTestsInLecture = !!shuffleLectureBox.checked; }
+    saveSettings(s);
+    state.userName=name;
+    state.mode = modeSel.value;
+    const tm = $('#timeSelect') ? parseInt($('#timeSelect').value,10) : 10;
+    // timer applies only in exam mode
+    if(state.mode==='exam'){
+      s.timeMin = (tm===5||tm===10||tm===15||tm===20)?tm:10;
+      saveSettings(s);
+      state.selectedTimeSec = s.timeMin*60;
+    }else{
+      state.selectedTimeSec = 0;
+    }
+    clearAttempt(testId);
     $('#startModal').style.display='none';
-
-    startTest(t.id);
+    startTest(testId);
   };
+
+  // Resume wiring
+  const resumeBtn = document.getElementById('btnResume');
+  const startNewBtn = document.getElementById('btnStartNew');
+  if(resumeBtn){
+    resumeBtn.onclick=()=>{
+      const name=$('#nameInput').value.trim();
+      if(!name) return;
+      s.lastName=name; 
+      saveSettings(s);
+      state.userName=name;
+      // restore
+      state.mode = saved.mode || 'exam';
+      state.lectureId = saved.lectureId || (state.lectureId||'L1');
+      state.qi = saved.qi || 0;
+      state.rows = Array.isArray(saved.rows)?saved.rows:[];
+      state.perms = Array.isArray(saved.perms)?saved.perms:[];
+      state.qOrder = Array.isArray(saved.qOrder)?saved.qOrder:null;
+      state.seed = saved.seed || 0;
+      state.totalTimeSec = saved.totalTimeSec || 0;
+      state.timeLeft = saved.timeLeft || 0;
+      state.startedAt = saved.startedAt || Date.now();
+      state.selectedTimeSec = saved.selectedTimeSec || 0;
+      $('#startModal').style.display='none';
+      // Restart timer if exam
+      if(state.mode==='exam') startTimer(); else stopTimer();
+      state.view='quiz';
+      renderQuestion();
+      scheduleAttemptSave();
+    };
+  }
+  if(startNewBtn){
+    startNewBtn.onclick=()=>startFresh();
+  }
+
+  $('#btnStart').onclick=()=>startFresh();
 }
 
 
+
 function startTest(testId){
-
-  const t = findTestById(testId);
-
-  if(!t){
-    toast('Не удалось найти тест', true);
-    return;
-  }
-
+  const t=findTestById(testId);
+  if(!t){ toast("Не удалось найти тест. Проверь загрузку JSON.", true); return; }
   state.view='quiz';
-  state.testId=t.id;
+  state.testId=testId;
 
   // Init attempt
   state.qi=0; 

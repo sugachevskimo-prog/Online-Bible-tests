@@ -1802,7 +1802,7 @@ function renderLecture(lectureId){
       <p class="small">Вопросов: ${(t.questions||[]).length}</p>
       ${statLine}
       <div class="toolbar" style="margin-top:12px">
-        <button class="btn primary" data-open-test="${t.id}">Начать</button>
+        <button class="btn primary" data-open-test="${L.id}___${idx}">Начать</button>
         ${(ts.attempts || last)?`<button class="btn" data-reset-test="${t.id}" title="Сбросить результаты этой главы">Сбросить</button>`:''}
       </div>
     </div>`;
@@ -1851,12 +1851,21 @@ function renderLecture(lectureId){
       card.style.display = (!q || title.includes(q)) ? '' : 'none';
     });
   });
-    $$('[data-open-test]').forEach(b=>b.onclick=()=>{
-    const testId=b.getAttribute('data-open-test');
-    state.currentLecture=L.id;
-    openStartModal(testId);
-  });
+  $$('[data-open-test]').forEach(b=>b.onclick=()=>{
 
+  const testId = b.getAttribute('data-open-test');
+
+  state.currentLecture = L.id;
+
+  const lecture =
+    LECTURES.find(x => x.id === L.id);
+
+  const test =
+    lecture.tests.find(x => x.id === testId);
+
+  openStartModal(test);
+
+});
 
   // reset per test (chapter)
   $$('[data-reset-test]').forEach(b=>b.onclick=()=>{
@@ -1986,9 +1995,11 @@ function finishMistakesChase(){
   $('#btnBackHome').onclick=()=>renderHome();
   $('#btnReviewAgain').onclick=()=>{ state.mistakeChase=false; openStartModal(state.testId); };
 }
-function openStartModal(testId){
-  state.testId=testId;
-  const t=findTestById(testId);
+function openStartModal(test){
+
+  state.testId = test.id;
+
+  const t = test;
   $('#startTitle').textContent = t? t.title : 'Начать тест';
 
   // Resume info (if exists)
@@ -2114,7 +2125,7 @@ function openStartModal(testId){
     }
     clearAttempt(testId);
     $('#startModal').style.display='none';
-    startTest(testId);
+startTest(test)
   };
 
   // Resume wiring
@@ -2156,8 +2167,17 @@ function openStartModal(testId){
 
 
 
-function startTest(testId){
-  const t=findTestById(testId);
+function startTest(test){
+
+  const t = test;
+
+  if(!t){
+    toast('Не удалось найти тест. Проверь загрузку JSON.', true);
+    return;
+  }
+
+  state.view='quiz';
+  state.testId=t.id;
   if(!t){ toast("Не удалось найти тест. Проверь загрузку JSON.", true); return; }
   state.view='quiz';
   state.testId=testId;

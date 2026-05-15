@@ -913,7 +913,13 @@ function buildFromQuestionsJson(obj){
     });
     LECTURES = lectures.length ? lectures : LECTURES;
     // flatten for convenience
-    TESTS = LECTURES.flatMap(l=>l.tests||[]);
+TESTS = [];
+
+LECTURES.forEach(l=>{
+  if(Array.isArray(l.tests)){
+    TESTS.push(...l.tests);
+  }
+});
     return;
   }
   if(obj && Array.isArray(obj.chapters)){

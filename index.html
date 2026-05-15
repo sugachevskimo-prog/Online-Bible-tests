@@ -746,37 +746,7 @@ function importQuestionsJsonFileForLecture(lectureId, file){
 
 function parseTestsFromAnyJson(obj){
 
-  // FORMAT 1:
-  // {
-  //   lectures:[{tests:[...]}]
-  // }
-
-  if(obj && Array.isArray(obj.lectures)){
-    return obj.lectures.flatMap(l => l.tests || []);
-  }
-
-  // FORMAT 2:
-  // {
-  //   Vorlesungen:[{Tests:[...]}]
-  // }
-
-  if(obj && Array.isArray(obj.Vorlesungen)){
-    return obj.Vorlesungen.flatMap(v => v.Tests || []);
-  }
-
-  // FORMAT 3:
-  // {
-  //   Tests:[...]
-  // }
-
-  if(obj && Array.isArray(obj.Tests)){
-    return obj.Tests;
-  }
-
-  return [];
-}
-
-  // FORMAT 1:
+   // FORMAT 1:
   // {
   //   lectures:[{tests:[...]}]
   // }

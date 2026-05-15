@@ -928,7 +928,13 @@ function buildFromQuestionsJson(obj){
   // 2) {chapters:[...]}  (existing embedded format)
   if(obj && Array.isArray(obj.lectures)){
     const lectures = obj.lectures.map((L, li)=>{
-      const tests = (L.tests||L.quizzes||[]).map((t, ti)=>__buildTest(t, `T${li+1}_${ti+1}`, `Тест ${ti+1}`));
+     const tests = (l.tests||l.quizzes||[]).map((t, ti)=>
+  __buildTest(
+    t,
+    `L${i+1}_T${ti+1}`,
+    `Тест ${ti+1}`
+  )
+);
       return { id: String(L.id ?? `L${li+1}`), title: String(L.title ?? `Лекция ${li+1}`), tests };
     });
     LECTURES = lectures.length ? lectures : LECTURES;

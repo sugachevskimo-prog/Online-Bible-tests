@@ -1996,10 +1996,61 @@ function finishMistakesChase(){
   $('#btnReviewAgain').onclick=()=>{ state.mistakeChase=false; openStartModal(state.testId); };
 }
 function openStartModal(test){
-state.testId=test.id;
-const t=test;
-  
-  $('#startTitle').textContent = t? t.title : 'Начать тест';
+
+  if(!test){
+    toast('Тест не найден', true);
+    return;
+  }
+
+  state.testId = test.id;
+
+  const t = test;
+
+  $('#startTitle').textContent =
+    t ? t.title : 'Начать тест';
+
+  // Resume info
+  const saved = loadAttempt(t.id);
+
+  // Fill defaults
+  const s = loadSettings();
+
+  $('#nameInput').value =
+    s.lastName || '';
+
+  if($('#timeSelect')){
+    $('#timeSelect').value =
+      String(s.timeMin || 10);
+  }
+
+  $('#startModal').style.display='flex';
+
+  const confirmBtn=()=>{
+    $('#btnStart').disabled =
+      $('#nameInput').value.trim().length===0;
+  };
+
+  $('#nameInput').oninput=confirmBtn;
+  confirmBtn();
+
+  $('#btnCancel').onclick=()=>{
+    $('#startModal').style.display='none';
+  };
+
+  $('#btnStart').onclick=()=>{
+
+    const name =
+      $('#nameInput').value.trim();
+
+    if(!name) return;
+
+    state.userName = name;
+
+    $('#startModal').style.display='none';
+
+    startTest(t.id);
+  };
+}
 
   // Resume info (if exists)
   const saved = loadAttempt(testId);
